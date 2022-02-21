@@ -1,13 +1,15 @@
 ---
 title: Lab - Manage your own Debian packages
 author: Sylvain Reynaud
+date : 21/02/2022
 geometry: margin=1in
 ---
 
 In this lab, you will learn to:
 
 * create your own Debian package,
-* setup your own Debian repository.
+* setup your own Debian repository,
+* sign your package and your repository.
 
 The lab uses a simple application called 'audioboard' for the example.
 
@@ -60,8 +62,11 @@ echo "Package: ${PACKAGE_NAME}
 Version: 0.0.1
 Maintainer: Me Me <me@me.local>
 Depends: mpg123
-Architecture: all
-Description: A program that play a sound" \
+Architecture: amd64
+Description: A program that play a sound
+Section: utils
+Priority: extra
+" \
 > ${PACKAGE_NAME}/DEBIAN/control
 ```
 
@@ -88,7 +93,7 @@ The default package name is `<package-name>_<version>-<release-number>_<architec
 ```sh
 export VERSION=0.0.1
 export RELEASE_NUMBER=1
-export ARCH=all
+export ARCH=amd64
 
 export FINAL_PACKAGE_NAME=${PACKAGE_NAME}_${VERSION}-${RELEASE_NUMBER}_${ARCH}.deb
 
@@ -115,7 +120,9 @@ Steps:
 * Add the repository to your `/etc/apt/sources.list.d` directory,
 * Install the package with `apt`.
 
-## Setup repository
+## Setup simple repository
+
+**On the developer machine**
 
 As root run `apt install dpkg-dev -y`, then:
 
@@ -126,14 +133,21 @@ cp ${FINAL_PACKAGE_NAME} repository/
 
 ## Generate Packages file
 
+**On the developer machine**
+
 Do this at every updates:
 
 ```sh
 cd repository
 dpkg-scanpackages -m . | gzip -9c > Packages.gz
-```
+```lly :
+
+`apt install reprepro`
+
 
 ## Expose the repository
+
+**The server is supposed to be on another machine** but for the example we will use the same machine.
 
 Expose the repository with a web server, here with a dockerized nginx on port 8000:
 
@@ -146,7 +160,11 @@ docker-compose up -d
 mv ../repository/ ./src
 ```
 
+
+
 ## Add repository to /etc/apt/sources.list.d
+
+**On the developer machine**
 
 ```sh
 export REPO_HOST=http://localhost:8000/repository
@@ -156,15 +174,99 @@ echo "deb [trusted=yes] ${REPO_HOST} ./" > /etc/apt/sources.list.d/${PACKAGE_NAM
 
 ## Install the package with `apt`
 
+**On the developer machine**
+
 ```sh
 # as root
 apt update
 apt install ${PACKAGE_NAME} -y
 ```
 
+## Sign deb package
+
+We previously used a flat repository. Here we will use a signed repository, which is a repository that contains the signature of the packages. First, we need to generate our gpg key.
+
+Configure gpg by editing `~/.gnupg/gpg.conf`. Set the following parameters:
+
+```
+# Prioritize stronger algorithms for new keys.
+default-preference-list SHA512 SHA384 SHA256 SHA224 AES256 AES192 AES CAST5 BZIP2 ZLIB ZIP Uncompressed
+# Use a stronger digest than the default SHA1 for certifications.
+cert-digest-algo SHA512
+```
+
+Then generate a gpg key : `gpg --gen-key` and finally export the key :
+
+```sh
+export EMAIL=john@example.com
+gpg --armor --export ${EMAIL} > ${EMAIL}.gpg.key
+```
+
+Your packages will be automatically signed as long as the name and email address in your package’s `control` file are the same as that of the GPG key you created.
+
+Otherwise you will have to sign your packages manually :
+
+```sh
+apt install dpkg-sig
+dpkg-sig --sign builder audioboard_0.0.1-1_amd64.deb
+```
+
+## Signed and non-flat repository
+
+On the **repository machine**, create a distribution configuration in the repository directory:
+
+```sh
+mkdir conf
+touch conf/distributions
+```
+
+```
+Origin: <your-repository-host>
+Label: apt repository
+Codename: <osrelease>
+Architectures: <arch>
+Components: main
+Description: My debian package repo
+SignWith: yes
+Pull: <osrelease>
+```
+In our case :
+
+* `<your-repository-host>` : localhost
+
+* `<osrelease>` : bullseye
+
+* `<arch>` : amd64
+
+Now, install `reprepro`, the tool that will create the complete structure (like specified on the [debian wiki](https://wiki.debian.org/DebianRepository/Format?action=show&redirect=RepositoryFormat)) inside the repository automatically :
+
+`apt install reprepro`
+
+Then, sign the repository :
+
+`reprepro -Vb . -S utils includedeb bullseye $(pwd)/audioboard_0.0.1-1_amd64.deb`
+
+Use `--ask-passphrase` is you have one on your gpg key.
+
+`utils` is the Section of the package (set in the `control` file).
+
+`bullseye` is the distribution name.
+
+## Test the package
+
+Add the gpg key to your keyring, then install the package !
+
+```sh
+wget -O - http://localhost:8000/repository/john@example.com.gpg.key | sudo apt-key add -
+apt update
+apt install ${PACKAGE_NAME} -y
+```
+
 # Sources
 
-* [LinuxHint - Debian Package Creation HowTo](https://linuxhint.com/debian-package-creation-howto/)
-* [LinuxConfig - Easy way to create a Debian package and local package repository](https://linuxconfig.org/easy-way-to-create-a-debian-package-and-local-package-repository)
-* [Eeathly - Creating and hosting your own deb packages and apt repo](https://earthly.dev/blog/creating-and-hosting-your-own-deb-packages-and-apt-repo/#step-1-creating-a-deb-package)
-* [Debian.org - 5. Control files and their fields](https://www.debian.org/doc/debian-policy/ch-controlfields.html#source-package-control-files-debian-control)
+* 18/02/2022 - [LinuxHint - Debian Package Creation HowTo](https://linuxhint.com/debian-package-creation-howto/)
+* 18/02/2022 - [LinuxConfig - Easy way to create a Debian package and local package repository](https://linuxconfig.org/easy-way-to-create-a-debian-package-and-local-package-repository)
+* 18/02/2022 - [Eeathly - Creating and hosting your own deb packages and apt repo](https://earthly.dev/blog/creating-and-hosting-your-own-deb-packages-and-apt-repo/#step-1-creating-a-deb-package)
+* 18/02/2022 - [Debian.org - 5. Control files and their fields](https://www.debian.org/doc/debian-policy/ch-controlfields.html#source-package-control-files-debian-control)
+* 18/02/2022 - [Debian.org - SetupWithReprepro](https://wiki.debian.org/DebianRepository/SetupWithReprepro)
+* 18/02/2022 - [Jon Cowie's blog - Creating your own Signed APT Repository and Debian Packages](https://scotbofh.wordpress.com/2011/04/26/creating-your-own-signed-apt-repository-and-debian-packages/)
