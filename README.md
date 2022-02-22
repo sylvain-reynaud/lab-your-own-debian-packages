@@ -257,7 +257,9 @@ Use `--ask-passphrase` is you have one on your gpg key.
 Add the gpg key to your keyring, then install the package !
 
 ```sh
-wget -O - http://localhost:8000/repository/john@example.com.gpg.key | sudo apt-key add -
+export REPO_HOST=http://localhost:8000/repository
+wget -O - ${REPO_HOST}/john@example.com.gpg.key | sudo apt-key add -
+echo "deb ${REPO_HOST} bullseye main" > /etc/apt/sources.list.d/${PACKAGE_NAME}.list
 apt update
 apt install ${PACKAGE_NAME} -y
 ```
